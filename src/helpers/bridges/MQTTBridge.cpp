@@ -36,14 +36,18 @@ static uint32_t randBound(uint32_t bound) { return bound ? (esp_random() % bound
 
 MQTTBridge::MQTTBridge(NodePrefs* prefs, mesh::PacketManager* mgr, mesh::RTCClock* rtc)
     : BridgeBase(prefs, mgr, rtc) {
+  // Fallback until setSelfIdentity() runs. getEfuseMac() keeps mac[0] in the lowest byte; bytes 0..2
+  // are the vendor prefix shared by every board, so take the four NIC-specific bytes 2..5.
   uint64_t mac = ESP.getEfuseMac();
-  memcpy(_relay_id, &mac, sizeof(_relay_id));
+  memcpy(_relay_id, reinterpret_cast<uint8_t*>(&mac) + 2, sizeof(_relay_id));
 }
 
 MQTTBridge::~MQTTBridge() { delete _core; }
 
+// Must run before begin(): the core copies the relay id when it is created.
 void MQTTBridge::setSelfIdentity(const uint8_t* pub_key, size_t len) {
-  if (len < 1) return;
+  if (len < PUB_KEY_SIZE) return;
+  relayIdFromPubKey(pub_key, _relay_id);
   _self_hash = pub_key[0];
   _have_self = true;
   if (_core) _core->setSelfHash(_self_hash);
@@ -97,15 +101,40 @@ void MQTTBridge::end() {
 void MQTTBridge::loop() {
   if (!_initialized || !_core) return;
   uint32_t now = millis();
+  bool tried_connect = false;  // at most one (possibly slow) connect attempt per loop() call
   for (int i = 0; i < _link_count; i++) {
     Link& l = _links[i];
     if (l.mqtt.connected()) {
       l.mqtt.loop();
-    } else if (WiFi.status() == WL_CONNECTED && l.backoff.due(now)) {
-      connectLink(l, now);  // may block up to MQTT_SOCKET_TIMEOUT_S; only when the backoff is due
+    } else if (!tried_connect && WiFi.status() == WL_CONNECTED && l.backoff.due(now)) {
+      tried_connect = true;
+      connectLink(l, now);  // blocks for DNS + TCP + CONNACK (bounded by the socket timeout)
     }
   }
   _core->loop(now);
+  drainSubQueue();
+}
+
+// Network I/O for subscriptions happens here, never while the radio is being serviced.
+void MQTTBridge::drainSubQueue() {
+  if (_subq.takeOverflow()) {  // requests were lost: bring every connected broker up to date
+    for (int i = 0; i < _link_count; i++) {
+      if (_links[i].mqtt.connected()) subscribeAll(_links[i]);
+    }
+  }
+  mqttbridge::SubOp op;
+  for (int budget = 8; budget > 0 && _subq.pop(&op); budget--) {
+    char t[32];
+    if (!makeTopic(MQTT_TOPIC_PREFIX, op.kind, op.hash, t, sizeof(t))) continue;
+    for (int i = 0; i < _link_count; i++) {
+      if (!_links[i].mqtt.connected()) continue;
+      if (op.subscribe) {
+        _links[i].mqtt.subscribe(t);
+      } else {
+        _links[i].mqtt.unsubscribe(t);
+      }
+    }
+  }
 }
 
 void MQTTBridge::connectLink(Link& l, uint32_t now) {
@@ -143,21 +172,10 @@ void MQTTBridge::onRadioTx(mesh::Packet* packet) {
   if (_initialized && _core) _core->onRadioTx(*packet, millis());
 }
 
-void MQTTBridge::subscribe(TopicKind kind, uint8_t hash) {
-  char t[32];
-  if (!makeTopic(MQTT_TOPIC_PREFIX, kind, hash, t, sizeof(t))) return;
-  for (int i = 0; i < _link_count; i++) {
-    if (_links[i].mqtt.connected()) _links[i].mqtt.subscribe(t);
-  }
-}
+// Called from the radio path (onRadioRx) and from loop(): only queue, the network work is deferred.
+void MQTTBridge::subscribe(TopicKind kind, uint8_t hash) { _subq.push(true, kind, hash); }
 
-void MQTTBridge::unsubscribe(TopicKind kind, uint8_t hash) {
-  char t[32];
-  if (!makeTopic(MQTT_TOPIC_PREFIX, kind, hash, t, sizeof(t))) return;
-  for (int i = 0; i < _link_count; i++) {
-    if (_links[i].mqtt.connected()) _links[i].mqtt.unsubscribe(t);
-  }
-}
+void MQTTBridge::unsubscribe(TopicKind kind, uint8_t hash) { _subq.push(false, kind, hash); }
 
 void MQTTBridge::publish(TopicKind kind, uint8_t hash, const uint8_t* envelope, size_t len) {
   char t[32];
@@ -169,6 +187,7 @@ void MQTTBridge::publish(TopicKind kind, uint8_t hash, const uint8_t* envelope, 
 
 void MQTTBridge::onMessage(const char* topic, const uint8_t* payload, unsigned int len) {
   if (!_core) return;
+  if (_prefs->disable_fwd) return;  // "repeat off": a repeater that does not forward must not inject
   TopicKind kind;
   uint8_t hash;
   if (!parseTopic(MQTT_TOPIC_PREFIX, topic, &kind, &hash)) return;
@@ -183,6 +202,7 @@ void MQTTBridge::onMessage(const char* topic, const uint8_t* payload, unsigned i
     _mgr->free(p);
     return;
   }
+  p->_snr = 0;  // allocNew() does not reset it; MQTT packets were not received on this radio
   if (r.kind == InjectKind::FLOOD_INBOUND) {
     _mgr->queueInbound(p, now);  // normal receive path: dedupe, append our hash, delay, forward
   } else {

@@ -199,3 +199,9 @@ TEST(DirectTarget, ReservedNextHopAndEmptyPayloadAreNone) {
   EXPECT_EQ(Target::NONE, directTarget(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {0xFF}, txt(1, 2))).kind);
   EXPECT_EQ(Target::NONE, directTarget(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {}, {})).kind);
 }
+
+TEST(DirectTarget, OnlyBridgedPayloadTypesArePublished) {
+  EXPECT_EQ(Target::NONE, directTarget(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_ADVERT, {0x55}, std::vector<uint8_t>(100, 1))).kind);
+  EXPECT_EQ(Target::NONE, directTarget(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_GRP_TXT, {0x55}, std::vector<uint8_t>(20, 1))).kind);
+  EXPECT_EQ(Target::NODE, directTarget(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_PATH, {0x55}, txt(1, 2))).kind);
+}

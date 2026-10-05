@@ -64,7 +64,7 @@ struct Inject {
 struct BridgeStats {
   uint32_t published, injected_flood, injected_direct;
   uint32_t dropped_ratelimit, dropped_queue_full, dropped_duplicate;
-  uint32_t suppressed_publish, own_dropped, bad_envelope;
+  uint32_t suppressed_publish, own_dropped, bad_envelope, rejected_policy;
 };
 
 typedef uint32_t (*RandFn)(uint32_t bound);  // returns a value in [0, bound)
@@ -86,6 +86,7 @@ class BridgeCore {
   PublishQueue _queue;
   KeyRing _injected;  // packets that came from MQTT: never published back
   KeyRing _sent;      // packets this node transmitted: never injected again
+  KeyRing _heard;     // packets heard on the radio: the MQTT copy would only duplicate them
   BridgeStats _stats;
 
   bool groupEnabled(uint8_t h) const {
@@ -142,6 +143,9 @@ public:
   // Call for every packet received from the radio, before the repeater logic runs (also for
   // duplicates). Keeps the neighbor subscriptions fresh.
   void onRadioRx(const mesh::Packet& p, uint32_t now) {
+    uint8_t key[KEY_LEN];
+    p.calculatePacketHash(key);
+    _heard.add(key);
     uint8_t h;
     if (!nearbyHash(p, &h)) return;
     if (_have_self && h == _self) return;
@@ -168,8 +172,7 @@ public:
   }
 
   // Call for every MQTT message received on a subscribed topic.
-  Inject onMqtt(TopicKind /*kind*/, uint8_t /*hash*/, const uint8_t* payload, size_t len,
-                uint32_t now) {
+  Inject onMqtt(TopicKind kind, uint8_t hash, const uint8_t* payload, size_t len, uint32_t now) {
     Inject none = {InjectKind::NONE, nullptr, 0};
     uint8_t from[4];
     const uint8_t* raw;
@@ -188,21 +191,27 @@ public:
       _stats.bad_envelope++;
       return none;
     }
+    // MQTT is untrusted: only carry what a publisher of this bridge emits, on the right topic.
+    bool group = p.getPayloadType() == PAYLOAD_TYPE_GRP_TXT;
+    if (p.getPayloadVer() > PAYLOAD_VER_1 || !isBridgedType(p) || !topicMatches(kind, hash, p) ||
+        (group && !groupEnabled(p.payload[0]))) {
+      _stats.rejected_policy++;
+      return none;
+    }
     uint8_t key[KEY_LEN];
     p.calculatePacketHash(key);
     _stats.suppressed_publish += (uint32_t)_queue.cancel(key);  // someone else already published it
-    if (_injected.contains(key) || _sent.contains(key)) {
+    if (_injected.contains(key) || _sent.contains(key) || _heard.contains(key)) {
       _stats.dropped_duplicate++;
       return none;
     }
-    if (p.isRouteDirect() && !isBridgeableDirect(p)) return none;
-
-    bool group = p.getPayloadType() == PAYLOAD_TYPE_GRP_TXT;
+    // Remember it even if the limiter drops it below, so that a radio copy forwarded later is
+    // still never published back.
+    _injected.add(key);
     if (!(group ? _group_inj_lim : _inj_lim).allow(now)) {
       _stats.dropped_ratelimit++;
       return none;
     }
-    _injected.add(key);
     uint8_t s;
     if (srcHash(p, &s) && !isReservedHash(s)) _reply.note(s, now);
 
@@ -221,6 +230,7 @@ public:
 
   // Call regularly from the main loop: expires neighbors and sends due publishes.
   void loop(uint32_t now) {
+    _reply.prune(now);
     uint8_t expired[16];
     int n;
     while ((n = _neighbors.expire(now, expired, 16)) > 0) {

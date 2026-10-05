@@ -190,7 +190,8 @@ TEST_F(BridgeCoreTest, DirectPacketsPublishToNextHopThenDestination) {
 
 TEST_F(BridgeCoreTest, DirectAckAtLastHopGoesToReplyCacheTopics) {
   // A message from node 0xA1 arrives over MQTT; its ACK will come back toward 0xA1.
-  Inject r = mqtt(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {}, txt(0xB1, 0xA1)), other, 1000);
+  Inject r = mqtt(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {}, txt(0xB1, 0xA1)), other, 1000,
+                  TopicKind::NODE, 0xB1);
   ASSERT_EQ(InjectKind::DIRECT_OUTBOUND, r.kind);
   core.onRadioTx(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_ACK, {}, std::vector<uint8_t>(4, 9)), 2000);
   core.loop(2000);
@@ -291,7 +292,7 @@ TEST_F(BridgeCoreTest, SamePacketFromTwoBrokersOrRelaysIsInjectedOnce) {
 TEST_F(BridgeCoreTest, PacketWeAlreadyTransmittedIsNotInjectedAgain) {
   Packet tx = mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {}, txt(0xB1, 0xA1));
   core.onRadioTx(tx, 0);
-  EXPECT_EQ(InjectKind::NONE, mqtt(tx, other, 10).kind);
+  EXPECT_EQ(InjectKind::NONE, mqtt(tx, other, 10, TopicKind::NODE, 0xB1).kind);
 }
 
 TEST_F(BridgeCoreTest, InjectedPacketIsNeverRepublishedWhenTheRepeaterForwardsIt) {
@@ -320,4 +321,76 @@ TEST_F(BridgeCoreTest, InjectRateLimitedPerMinuteAndGroupSeparately) {
   g[0] = 0x11;
   std::vector<uint8_t> env = envelopeOf(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_GRP_TXT, {}, g), other);
   EXPECT_EQ(InjectKind::FLOOD_INBOUND, lc.onMqtt(TopicKind::GROUP, 0x11, env.data(), env.size(), 100).kind);
+}
+
+// ---- review fixes ---------------------------------------------------------------------------
+
+TEST_F(BridgeCoreTest, PacketHeardOnRadioIsNotInjectedAndDoesNotSpendTheLimit) {
+  BridgeConfig c = testCfg();
+  c.inject_per_min = 1;
+  RecSink s2;
+  BridgeCore lc(c, rid, s2, zeroRand);
+  // another relay in our area forwarded this direct packet and we heard it on the radio
+  Packet heard = mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {0x55}, txt(0xB1, 0xA1));
+  lc.onRadioRx(heard, 100);
+  std::vector<uint8_t> env = envelopeOf(heard, other);
+  EXPECT_EQ(InjectKind::NONE, lc.onMqtt(TopicKind::NODE, 0x55, env.data(), env.size(), 200).kind);
+  EXPECT_EQ(1u, lc.stats().dropped_duplicate);
+  // the one token of the minute is still available for a different packet
+  Packet fresh = mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_TXT_MSG, {0x55}, txt(0xB1, 0xA1, 2));
+  env = envelopeOf(fresh, other);
+  EXPECT_EQ(InjectKind::DIRECT_OUTBOUND, lc.onMqtt(TopicKind::NODE, 0x55, env.data(), env.size(), 300).kind);
+}
+
+TEST_F(BridgeCoreTest, RateLimitedMqttPacketIsStillNeverRepublished) {
+  BridgeConfig c = testCfg();
+  c.inject_per_min = 1;
+  RecSink s2;
+  BridgeCore lc(c, rid, s2, zeroRand);
+  lc.setSelfHash(SELF);
+  Packet p1 = mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_TXT_MSG, {0x31}, txt(0xA1, 0xB1, 1));
+  Packet p2 = mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_TXT_MSG, {0x31}, txt(0xA1, 0xB1, 2));
+  std::vector<uint8_t> e1 = envelopeOf(p1, other), e2 = envelopeOf(p2, other);
+  EXPECT_EQ(InjectKind::FLOOD_INBOUND, lc.onMqtt(TopicKind::NODE, 0xA1, e1.data(), e1.size(), 100).kind);
+  EXPECT_EQ(InjectKind::NONE, lc.onMqtt(TopicKind::NODE, 0xA1, e2.data(), e2.size(), 101).kind);  // limited
+  // the same packet later reaches us over the radio and the repeater forwards it
+  Packet fwd = p2;
+  fwd.path[1] = SELF;
+  fwd.setPathHashCount(2);
+  lc.onRadioTx(fwd, 200);
+  lc.loop(200);
+  EXPECT_EQ(0, s2.count("pub"));
+}
+
+TEST_F(BridgeCoreTest, InjectedKeysAreRememberedAcrossManyPackets) {
+  Packet first = mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_TXT_MSG, {0x31}, txt(0xA1, 0xB1, 1));
+  ASSERT_EQ(InjectKind::FLOOD_INBOUND, mqtt(first, other, 0).kind);
+  for (int i = 2; i <= 40; i++) {
+    Packet p = mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_TXT_MSG, {0x31}, txt(0xA1, 0xB1, (uint8_t)i));
+    ASSERT_EQ(InjectKind::FLOOD_INBOUND, mqtt(p, other, 0).kind) << i;
+  }
+  EXPECT_EQ(InjectKind::NONE, mqtt(first, other, 1).kind);  // 40 packets later: still a duplicate
+}
+
+TEST_F(BridgeCoreTest, OnlyBridgedTypesVersionOneAndMatchingTopicsAreInjected) {
+  std::vector<uint8_t> grp(24, 0x31);
+  grp[0] = 0x11;
+  // not a type the publisher emits
+  EXPECT_EQ(InjectKind::NONE, mqtt(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_ADVERT, {}, std::vector<uint8_t>(100, 3)), other, 0).kind);
+  EXPECT_EQ(InjectKind::NONE, mqtt(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_GRP_DATA, {}, grp), other, 0, TopicKind::GROUP, 0x11).kind);
+  // payload version above 1 is rejected by the repeater too
+  Packet v2 = mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_TXT_MSG, {0x31}, txt(0xA1, 0xB1, 9));
+  v2.header |= (2 << PH_VER_SHIFT);
+  EXPECT_EQ(InjectKind::NONE, mqtt(v2, other, 0).kind);
+  // topic does not match the packet's destination / channel
+  EXPECT_EQ(InjectKind::NONE, mqtt(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_TXT_MSG, {0x31}, txt(0xA1, 0xB1, 10)), other, 0, TopicKind::NODE, 0xB2).kind);
+  EXPECT_EQ(InjectKind::NONE, mqtt(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_GRP_TXT, {}, grp), other, 0, TopicKind::GROUP, 0x12).kind);
+  // a channel that is not enabled
+  std::vector<uint8_t> other_ch(24, 0x32);
+  other_ch[0] = 0x22;
+  EXPECT_EQ(InjectKind::NONE, mqtt(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_GRP_TXT, {}, other_ch), other, 0, TopicKind::GROUP, 0x22).kind);
+  EXPECT_EQ(6u, core.stats().rejected_policy);
+  // what the publisher does emit is accepted: a direct ACK on a node topic (it has no destination)
+  EXPECT_EQ(InjectKind::DIRECT_OUTBOUND, mqtt(mk(ROUTE_TYPE_DIRECT, PAYLOAD_TYPE_ACK, {}, std::vector<uint8_t>(4, 0x55)), other, 0, TopicKind::NODE, 0xA1).kind);
+  EXPECT_EQ(InjectKind::FLOOD_INBOUND, mqtt(mk(ROUTE_TYPE_FLOOD, PAYLOAD_TYPE_GRP_TXT, {}, grp), other, 0, TopicKind::GROUP, 0x11).kind);
 }

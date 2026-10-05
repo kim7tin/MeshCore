@@ -44,6 +44,11 @@ Use the env `Heltec_v3_repeater_bridge_mqtt` as a template and set the flags:
 - Plain MQTT only (no TLS); use a private broker or a VPN, and broker ACLs on `<prefix>/#`.
 - Every Public-channel message from another area is re-transmitted by every subscribed repeater
   in range: airtime grows with the number of linked areas. Keep the group rate limit low.
-- Connecting to a broker can block the main loop for up to 2 s per attempt; attempts back off from
-  1 s to 60 s while a broker is unreachable.
+- Connecting to a broker (DNS, TCP and the MQTT handshake) blocks the main loop while it runs, and
+  at most one broker is tried per loop iteration. Attempts back off from 1 s to 60 s while a broker
+  is unreachable. Subscriptions are queued and sent from the loop, never from the radio path, but
+  a publish to a half-open connection can still stall the loop until the TCP timeout.
+- Packets coming from MQTT are only accepted if they are of a type this bridge publishes, have
+  payload version 1, and arrive on the topic that matches their destination or channel.
+- The bridge ignores MQTT traffic while `repeat` is off.
 - The repeater keeps working as a normal LoRa repeater when WiFi or the brokers are down.

@@ -6,6 +6,8 @@
 #include "helpers/bridges/BridgeBase.h"
 #include "helpers/bridges/mqtt/Backoff.h"
 #include "helpers/bridges/mqtt/BridgeCore.h"
+#include "helpers/bridges/mqtt/RelayId.h"
+#include "helpers/bridges/mqtt/SubQueue.h"
 
 /**
  * @brief Bridges repeater traffic to MQTT brokers (up to two) over WiFi.
@@ -49,6 +51,7 @@ private:
   Link _links[MAX_LINKS];
   int _link_count = 0;
   mqttbridge::BridgeCore* _core = nullptr;
+  mqttbridge::SubQueue _subq;  // subscribe/unsubscribe requests, drained from loop()
   uint8_t _relay_id[4];
   uint8_t _self_hash = 0;
   bool _have_self = false;
@@ -60,6 +63,7 @@ private:
                size_t len) override;
 
   void connectLink(Link& link, uint32_t now);
+  void drainSubQueue();
   void subscribeAll(Link& link);
   void onMessage(const char* topic, const uint8_t* payload, unsigned int len);
 };

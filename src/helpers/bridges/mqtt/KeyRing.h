@@ -5,9 +5,9 @@
 
 namespace mqttbridge {
 
-// Remembers the last 32 packet keys (8-byte packet hashes). Oldest entry is overwritten first.
+// Remembers the last 64 packet keys (8-byte packet hashes). Oldest entry is overwritten first.
 class KeyRing {
-  static const int SLOTS = 32;
+  static const int SLOTS = 64;
   uint8_t _key[SLOTS][8];
   bool _used[SLOTS];
   int _next;

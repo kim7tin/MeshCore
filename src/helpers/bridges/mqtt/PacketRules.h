@@ -4,6 +4,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "MqttTopics.h"
+
 namespace mqttbridge {
 
 // 0x00 and 0xFF are reserved node hashes in MeshCore; never turn them into topics.
@@ -91,6 +93,26 @@ inline bool isBridgeableDirect(const mesh::Packet& p) {
   }
 }
 
+// The payload types this bridge carries: flood TXT/REQ/RESPONSE/PATH/ANON_REQ and GRP_TXT, direct
+// TXT/REQ/RESPONSE/PATH/ANON_REQ and ACK. Everything else (adverts, other group types, custom
+// payloads, TRACE, CONTROL, MULTIPART) stays on the radio it came from.
+inline bool isBridgedType(const mesh::Packet& p) {
+  switch (p.getPayloadType()) {
+    case PAYLOAD_TYPE_TXT_MSG:
+    case PAYLOAD_TYPE_REQ:
+    case PAYLOAD_TYPE_RESPONSE:
+    case PAYLOAD_TYPE_PATH:
+    case PAYLOAD_TYPE_ANON_REQ:
+      return true;
+    case PAYLOAD_TYPE_GRP_TXT:
+      return p.isRouteFlood();
+    case PAYLOAD_TYPE_ACK:
+      return p.isRouteDirect();
+    default:
+      return false;
+  }
+}
+
 struct Target {
   enum Kind : uint8_t { NONE, NODE, GROUP, REPLY_CACHE };
   Kind kind;
@@ -122,7 +144,9 @@ inline Target floodTarget(const mesh::Packet& p) {
 // node removed its own hash from the path: the next hop if any, else the destination in the
 // payload, else (an ACK has neither) the ReplyCache topics.
 inline Target directTarget(const mesh::Packet& p) {
-  if (!p.isRouteDirect() || !isBridgeableDirect(p)) return makeTarget(Target::NONE, 0);
+  if (!p.isRouteDirect() || !isBridgeableDirect(p) || !isBridgedType(p)) {
+    return makeTarget(Target::NONE, 0);
+  }
   uint8_t h;
   if (p.getPathHashCount() > 0) {
     h = p.path[0];
@@ -131,6 +155,20 @@ inline Target directTarget(const mesh::Packet& p) {
                                                   : makeTarget(Target::NONE, 0);
   }
   return isReservedHash(h) ? makeTarget(Target::NONE, 0) : makeTarget(Target::NODE, h);
+}
+
+// True if a packet received from MQTT on topic (kind, hash) is what a publisher would have put
+// there. A direct ACK has no destination, so it may arrive on any node topic.
+inline bool topicMatches(TopicKind kind, uint8_t hash, const mesh::Packet& p) {
+  if (p.isRouteFlood()) {
+    Target t = floodTarget(p);
+    if (t.kind == Target::NODE) return kind == TopicKind::NODE && hash == t.hash;
+    if (t.kind == Target::GROUP) return kind == TopicKind::GROUP && hash == t.hash;
+    return false;
+  }
+  if (p.getPayloadType() == PAYLOAD_TYPE_ACK) return kind == TopicKind::NODE;
+  Target t = directTarget(p);
+  return t.kind == Target::NODE && kind == TopicKind::NODE && hash == t.hash;
 }
 
 }  // namespace mqttbridge

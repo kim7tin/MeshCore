@@ -5,6 +5,8 @@
 #include "helpers/bridges/mqtt/WindowLimiter.h"
 #include "helpers/bridges/mqtt/Backoff.h"
 #include "helpers/bridges/mqtt/PublishQueue.h"
+#include "helpers/bridges/mqtt/RelayId.h"
+#include "helpers/bridges/mqtt/SubQueue.h"
 
 using namespace mqttbridge;
 
@@ -21,13 +23,13 @@ TEST(KeyRing, ContainsAfterAddAndEvictsOldest) {
   EXPECT_FALSE(r.contains(k));
   r.add(k);
   EXPECT_TRUE(r.contains(k));
-  for (int i = 2; i <= 33; i++) {  // 32 more distinct keys push key 1 out of 32 slots
+  for (int i = 2; i <= 65; i++) {  // 64 more distinct keys push key 1 out of 64 slots
     keyOf(i, k);
     r.add(k);
   }
   keyOf(1, k);
   EXPECT_FALSE(r.contains(k));
-  keyOf(33, k);
+  keyOf(65, k);
   EXPECT_TRUE(r.contains(k));
 }
 
@@ -36,7 +38,7 @@ TEST(KeyRing, AddingTheSameKeyTwiceUsesOneSlot) {
   uint8_t k[8];
   keyOf(7, k);
   for (int i = 0; i < 100; i++) r.add(k);
-  for (int i = 100; i < 131; i++) {  // 31 others: key 7 must still be there
+  for (int i = 100; i < 163; i++) {  // 63 others: key 7 must still be there
     uint8_t o[8];
     keyOf(i, o);
     r.add(o);
@@ -153,4 +155,53 @@ TEST(PublishQueue, DueUsesWrapSafeCompare) {
   PendingPublish p;
   EXPECT_FALSE(q.popDue(0xFFFFFF00u + 299u, &p));
   EXPECT_TRUE(q.popDue(0xFFFFFF00u + 300u, &p));
+}
+
+TEST(ReplyCache, EntryDoesNotComeBackAfterHalfOfTheMillisRange) {
+  ReplyCache c(15000);
+  c.note(0xA1, 1000);
+  uint8_t out[8];
+  EXPECT_EQ(0, c.collect(1000 + 0x80000000u + 10u, out, 8));  // 24.8 days later: still expired
+}
+
+TEST(ReplyCache, PruneFreesExpiredEntries) {
+  ReplyCache c(15000);
+  c.note(0xA1, 1000);
+  c.prune(1000 + 15000);  // expired: freed for good
+  uint8_t out[8];
+  // 2^32 ms later the clock reads 1000 again; an entry that was only hidden would look brand new
+  EXPECT_EQ(0, c.collect(1000, out, 8));
+}
+
+TEST(SubQueue, KeepsOrderAndReportsOverflowOnce) {
+  SubQueue q;
+  SubOp op;
+  EXPECT_FALSE(q.pop(&op));
+  q.push(true, TopicKind::NODE, 0x31);
+  q.push(false, TopicKind::NODE, 0x32);
+  ASSERT_TRUE(q.pop(&op));
+  EXPECT_TRUE(op.subscribe);
+  EXPECT_EQ(0x31, op.hash);
+  ASSERT_TRUE(q.pop(&op));
+  EXPECT_FALSE(op.subscribe);
+  EXPECT_EQ(0x32, op.hash);
+  EXPECT_FALSE(q.takeOverflow());
+  for (int i = 0; i < 40; i++) q.push(true, TopicKind::NODE, (uint8_t)i);  // capacity is 32
+  EXPECT_TRUE(q.takeOverflow());
+  EXPECT_FALSE(q.takeOverflow());  // reported once
+  int n = 0;
+  while (q.pop(&op)) n++;
+  EXPECT_EQ(32, n);
+}
+
+TEST(RelayId, DerivedFromPublicKeyNotFromItsFirstByte) {
+  uint8_t a[32] = {0}, b[32] = {0}, out_a[4], out_b[4], out_a2[4];
+  a[0] = b[0] = 0x21;  // same node hash
+  a[3] = 0x10;
+  b[3] = 0x11;         // keys differ only in a later byte
+  relayIdFromPubKey(a, out_a);
+  relayIdFromPubKey(b, out_b);
+  relayIdFromPubKey(a, out_a2);
+  EXPECT_NE(0, memcmp(out_a, out_b, 4));
+  EXPECT_EQ(0, memcmp(out_a, out_a2, 4));
 }
