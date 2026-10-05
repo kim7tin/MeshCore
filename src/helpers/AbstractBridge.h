@@ -43,4 +43,29 @@ public:
    * @param packet The packet that was received.
    */
   virtual void onPacketReceived(mesh::Packet* packet) = 0;
+
+  /**
+   * @brief Called for every packet received from the radio, before the repeater logic runs.
+   * Default: ignored. Used by bridges that need to see all radio traffic (e.g. MQTT).
+   *
+   * @param packet The packet that was received.
+   */
+  virtual void onRadioRx(mesh::Packet* packet) { (void)packet; }
+
+  /**
+   * @brief Called for every packet this node transmits on the radio.
+   * Default: ignored.
+   *
+   * @param packet The packet that was transmitted.
+   */
+  virtual void onRadioTx(mesh::Packet* packet) { (void)packet; }
+
+  /**
+   * @brief Tells the bridge this node's public key (its hash is the first byte).
+   * Default: ignored.
+   *
+   * @param pub_key Public key bytes.
+   * @param len Number of bytes in pub_key.
+   */
+  virtual void setSelfIdentity(const uint8_t* pub_key, size_t len) { (void)pub_key; (void)len; }
 };

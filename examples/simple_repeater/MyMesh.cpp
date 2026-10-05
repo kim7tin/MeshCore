@@ -481,6 +481,7 @@ void MyMesh::logRx(mesh::Packet *pkt, int len, float score) {
   if (_prefs.bridge_pkt_src == 1) {
     bridge.sendPacket(pkt);
   }
+  bridge.onRadioRx(pkt);
 #endif
 
   if (_logging) {
@@ -507,6 +508,7 @@ void MyMesh::logTx(mesh::Packet *pkt, int len) {
   if (_prefs.bridge_pkt_src == 0) {
     bridge.sendPacket(pkt);
   }
+  bridge.onRadioTx(pkt);
 #endif
 
   if (_logging) {
@@ -873,6 +875,9 @@ MyMesh::MyMesh(mesh::MainBoard &board, mesh::Radio &radio, mesh::MillisecondCloc
 #if defined(WITH_ESPNOW_BRIDGE)
       , bridge(&_prefs, _mgr, &rtc)
 #endif
+#if defined(WITH_MQTT_BRIDGE)
+      , bridge(&_prefs, _mgr, &rtc)
+#endif
 {
   last_millis = 0;
   uptime_millis = 0;
@@ -972,6 +977,7 @@ void MyMesh::begin(FILESYSTEM *fs) {
   }
 
 #if defined(WITH_BRIDGE)
+  bridge.setSelfIdentity(self_id.pub_key, PUB_KEY_SIZE);
   if (_prefs.bridge_enabled) {
     bridge.begin();
   }
