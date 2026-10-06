@@ -1,0 +1,1 @@
+bdd4b7d1e29b9d1f53f9d31e39373649d49f44fa26daf3b935c6272b10e07284  heltec_v3_mqtt_bridge.bin

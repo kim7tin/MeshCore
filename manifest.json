@@ -1,0 +1,13 @@
+{
+  "name": "MeshCore MQTT Bridge (Heltec V3)",
+  "version": "2026.10.06-b2e8cdb",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-S3",
+      "parts": [
+        { "path": "heltec_v3_mqtt_bridge.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
