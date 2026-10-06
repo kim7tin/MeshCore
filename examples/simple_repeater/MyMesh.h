@@ -256,6 +256,12 @@ public:
   }
 #endif
 
+#if defined(WITH_MQTT_BRIDGE)
+  // "set mqtt.*" / "get mqtt*" are owned by the MQTT bridge
+  bool handleSetConfig(const char* config, char* reply) override { return bridge.handleSetConfig(config, reply); }
+  bool handleGetConfig(const char* config, char* reply) override { return bridge.handleGetConfig(config, reply); }
+#endif
+
   // To check if there is pending work
   bool hasPendingWork() const;
 

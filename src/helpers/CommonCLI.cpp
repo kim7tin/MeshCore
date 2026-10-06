@@ -692,6 +692,8 @@ void CommonCLI::handleSetCmd(uint32_t sender_timestamp, char* command, char* rep
       }
     }
   #endif
+  } else if (_callbacks->handleSetConfig(config, reply)) {
+    // handled by a plugin (e.g. the MQTT bridge)
   } else {
     strcpy(reply, "unknown config: ");
     StrHelper::strncpy(&reply[16], config, 160-17);
@@ -829,6 +831,8 @@ void CommonCLI::handleGetCmd(uint32_t sender_timestamp, char* command, char* rep
     if (tmp == reply) {
       sprintf(reply, "No extra SF configured");
     }
+  } else if (_callbacks->handleGetConfig(config, reply)) {
+    // handled by a plugin (e.g. the MQTT bridge)
   } else {
     sprintf(reply, "??: %s", config);
   }

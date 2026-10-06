@@ -26,14 +26,46 @@ QoS 0, no retain.
 
 ## Build
 
-Use the env `Heltec_v3_repeater_bridge_mqtt` as a template and set the flags:
+Use the env `Heltec_v3_repeater_bridge_mqtt` as a template. It contains no WiFi or broker details:
+one firmware image works for everybody and is configured from the CLI (next section).
 
-| Flag | Meaning |
-|---|---|
-| `MQTT_WIFI_SSID`, `MQTT_WIFI_PASSWORD` | WiFi |
-| `MQTT_TOPIC_PREFIX` | Topic prefix shared by all bridged repeaters (default `ktm`) |
-| `MQTT_BROKER1_HOST/PORT/USER/PASS` | First broker (plain MQTT 3.1.1) |
-| `MQTT_BROKER2_HOST/PORT/USER/PASS` | Optional second broker |
+## Configure from the CLI
+
+Use the serial console (or the remote admin CLI). Until a WiFi network **and** a first broker are
+set, the bridge stays off and the repeater works as a normal LoRa repeater.
+
+```
+set mqtt.ssid <wifi name>            get mqtt.ssid
+set mqtt.wifipass <wifi password>    get mqtt.wifipass     (shows ***)
+set mqtt.host <broker host or ip>    get mqtt.host
+set mqtt.port <1-65535>              get mqtt.port         (default 1883)
+set mqtt.user <user>                 get mqtt.user
+set mqtt.pass <password>             get mqtt.pass         (shows ***)
+set mqtt.host2 / port2 / user2 / pass2     optional second broker
+set mqtt.prefix <topic prefix>       get mqtt.prefix       (default meshcore, all bridged repeaters must agree)
+set mqtt.group on|off                bridge the Public channel (default on)
+get mqtt                             one-line status: WiFi and every broker up/down
+```
+
+- The value is the rest of the line, so names with spaces work (`set mqtt.ssid My Home WiFi`).
+  An empty value clears a setting (`set mqtt.pass`).
+- Every change restarts the bridge (if `bridge.enabled` is on) with the new settings.
+- Settings are kept in `/mqtt.cfg` on the internal flash as plain `key=value` lines, **passwords
+  included and not encrypted**. `get` never shows them.
+- Typical session:
+
+```
+set mqtt.ssid My Home WiFi
+set mqtt.wifipass my wifi password
+set mqtt.host broker.example.org
+set mqtt.user relay
+set mqtt.pass broker password
+get mqtt
+```
+
+The `MQTT_*` build flags (`MQTT_WIFI_SSID`, `MQTT_WIFI_PASSWORD`, `MQTT_TOPIC_PREFIX`,
+`MQTT_BROKER1_HOST/PORT/USER/PASS`, `MQTT_BROKER2_*`) are optional defaults for the same settings;
+anything stored with `set` takes precedence.
 
 `bridge.enabled on|off` (existing CLI) starts/stops the bridge.
 
@@ -41,7 +73,8 @@ Use the env `Heltec_v3_repeater_bridge_mqtt` as a template and set the flags:
 
 - Adverts are not bridged: **both nodes must add each other as contacts manually** (QR / public key).
 - A standalone flood ACK, TRACE, CONTROL and MULTIPART packets are not bridged.
-- Plain MQTT only (no TLS); use a private broker or a VPN, and broker ACLs on `<prefix>/#`.
+- Plain MQTT only (no TLS): the MQTT user name and password cross the network in clear text. Use a
+  private broker or a VPN, and broker ACLs on `<prefix>/#`.
 - Every Public-channel message from another area is re-transmitted by every subscribed repeater
   in range: airtime grows with the number of linked areas. Keep the group rate limit low.
 - Connecting to a broker (DNS, TCP and the MQTT handshake) blocks the main loop while it runs, and

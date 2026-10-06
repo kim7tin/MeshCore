@@ -976,6 +976,9 @@ void MyMesh::begin(FILESYSTEM *fs) {
     }
   }
 
+#if defined(WITH_MQTT_BRIDGE)
+  bridge.setFileSystem(fs);
+#endif
 #if defined(WITH_BRIDGE)
   bridge.setSelfIdentity(self_id.pub_key, PUB_KEY_SIZE);
   if (_prefs.bridge_enabled) {

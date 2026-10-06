@@ -258,6 +258,12 @@ public:
   virtual void removeNeighbor(const uint8_t* pubkey, int key_len) {
     // no op by default
   };
+
+  // Lets a plugin (for example a bridge) own settings under its own prefix, e.g. "set mqtt.ssid ...".
+  // 'config' is the command text after "set " / "get ". Return true if the plugin handled it
+  // (and wrote the reply), false to let the normal "unknown config" handling continue.
+  virtual bool handleSetConfig(const char* config, char* reply) { return false; }
+  virtual bool handleGetConfig(const char* config, char* reply) { return false; }
   virtual void formatStatsReply(char *reply) = 0;
   virtual void formatRadioStatsReply(char *reply) = 0;
   virtual void formatPacketStatsReply(char *reply) = 0;
