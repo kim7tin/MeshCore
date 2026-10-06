@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeshCore MQTT Bridge - Nạp firmware Heltec V3</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#1b1f23; --muted:#5b6670; --line:#d6dbe0; --accent:#0b6bcb; --warn:#fff4d6; --warnfg:#5a4300; --card:#f6f8fa; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#14181c; --fg:#e6e9ec; --muted:#9aa5b0; --line:#2c343c; --accent:#58a6ff; --warn:#3a3000; --warnfg:#ffe08a; --card:#1b2127; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.55 system-ui, "Segoe UI", Roboto, sans-serif; }
+  main { max-width:780px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; } h2 { font-size:1.2rem; margin:36px 0 8px; } h3 { font-size:1rem; margin:18px 0 4px; }
+  p, li { margin:6px 0; } .muted { color:var(--muted); font-size:.92rem; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin:12px 0; }
+  .warn { background:var(--warn); color:var(--warnfg); border-radius:10px; padding:12px 16px; margin:16px 0; } .warn p, .warn li { color:inherit; }
+  label { display:block; font-size:.9rem; margin:10px 0 2px; } label small { color:var(--muted); }
+  input { width:100%; box-sizing:border-box; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--fg); font:inherit; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:0 12px; } @media (max-width:560px) { .row { grid-template-columns:1fr; } }
+  button { font:inherit; padding:9px 14px; border-radius:8px; border:1px solid var(--accent); background:var(--accent); color:#fff; cursor:pointer; margin:8px 8px 0 0; }
+  button.secondary { background:transparent; color:var(--accent); } button:disabled { opacity:.45; cursor:not-allowed; }
+  pre { background:#0d1117; color:#c9d1d9; padding:12px; border-radius:8px; max-height:260px; overflow:auto; font-size:.85rem; white-space:pre-wrap; word-break:break-word; margin:12px 0 0; }
+  code { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:.9em; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; } th, td { border:1px solid var(--line); padding:6px 8px; text-align:left; vertical-align:top; }
+  details { margin:10px 0; } summary { cursor:pointer; font-weight:600; }
+  .bad { color:#cf222e; }
+  nav a { margin-right:14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>MeshCore MQTT Bridge</h1>
+  <div class="muted">Nạp firmware cho <b>Heltec WiFi LoRa 32 V3</b> và cài WiFi ngay trên trình duyệt. <span id="ver"></span></div>
+  <nav class="muted" style="margin-top:8px"><a href="#nap">1. Nạp firmware</a><a href="#wifi">2. Cài WiFi</a><a href="#kiemtra">3. Kiểm tra</a><a href="#dung">4. Dùng với app</a><a href="#loi">5. Sự cố</a><a href="#nangcao">6. Nâng cao</a></nav>
+
+  <div class="warn">
+    <p><b>Đây là bản firmware không chính thức</b>, chưa nằm trong MeshCore gốc. Dùng ở mức thử nghiệm, tự chịu rủi ro.</p>
+    <ul>
+      <li>Firmware đã <b>có sẵn địa chỉ máy chủ MQTT thử nghiệm</b> của người chia sẻ (cùng cổng và tiền tố <code>ktm</code>). <b>Tài khoản và mật khẩu MQTT không nằm trong firmware</b>: người chia sẻ gửi riêng cho bạn, bạn nhập vào bước 2. Tài khoản này chỉ dùng được chủ đề <code>ktm/#</code> và có thể bị thu hồi bất cứ lúc nào.</li>
+      <li>Kết nối MQTT <b>không mã hoá</b>; nội dung tin MeshCore vẫn được mã hoá, nhưng thông tin định tuyến (hash nguồn/đích, thời điểm, kích thước) thì không.</li>
+      <li>Chọn đúng băng tần hợp pháp ở nơi bạn ở và <b>gắn ăng-ten trước khi cấp nguồn</b>.</li>
+    </ul>
+  </div>
+
+  <h2 id="nap">1. Nạp firmware</h2>
+  <div class="card">
+    <h3>Bạn cần</h3>
+    <ul>
+      <li>1 board <b>Heltec WiFi LoRa 32 V3</b> (có ăng-ten LoRa gắn sẵn) và cáp USB <b>có truyền dữ liệu</b> (không phải cáp chỉ sạc).</li>
+      <li>Máy tính dùng <b>Chrome hoặc Edge</b> (Safari, Firefox và điện thoại không dùng được).</li>
+      <li>Mạng WiFi <b>2,4 GHz</b> (board không nối được WiFi 5 GHz) và biết tên cùng mật khẩu.</li>
+    </ul>
+    <h3>Các bước</h3>
+    <ol>
+      <li>Cắm board vào máy tính. Nếu Windows không thấy cổng COM, cài driver <b>CP210x</b> của Silicon Labs rồi cắm lại.</li>
+      <li>Bấm nút bên dưới, chọn cổng của board (thường tên có "CP210x" hoặc "USB Serial"), bấm <b>Install</b>.</li>
+      <li>Nên chọn <b>"Erase device"</b> nếu board từng chạy firmware khác (cấu hình cũ bị xoá).</li>
+      <li>Chờ khoảng 1 đến 2 phút đến khi báo hoàn tất. Đừng rút cáp trong lúc nạp.</li>
+    </ol>
+    <esp-web-install-button manifest="manifest.json">
+      <button slot="activate">Nạp firmware vào Heltec V3</button>
+      <span slot="unsupported" class="bad">Trình duyệt này không hỗ trợ Web Serial. Hãy dùng Chrome hoặc Edge trên máy tính.</span>
+      <span slot="not-allowed" class="bad">Trang cần chạy qua HTTPS.</span>
+    </esp-web-install-button>
+    <p class="muted">Nạp lỗi? Giữ nút <b>PRG (BOOT)</b> trên board, nhấn <b>RST</b> một lần rồi thả PRG, rồi thử lại.</p>
+  </div>
+
+  <h2 id="wifi">2. Cài WiFi</h2>
+  <div class="card">
+    <p><b>Bạn cần nhập 4 thứ:</b> tên WiFi, mật khẩu WiFi, tài khoản MQTT và mật khẩu MQTT (hai thứ sau do người chia sẻ gửi riêng cho bạn). Địa chỉ máy chủ đã được đặt sẵn trong firmware. Thông tin chỉ được gửi tới board qua cáp USB, không gửi lên internet.</p>
+    <ol>
+      <li>Sau khi nạp xong, rút rồi cắm lại cáp (hoặc nhấn RST).</li>
+      <li>Bấm <b>Kết nối board</b> và chọn cùng cổng. Chờ vài giây (board khởi động lại khi mở cổng).</li>
+      <li>Nhập <b>tên WiFi</b>, <b>mật khẩu WiFi</b>, <b>tài khoản MQTT</b> và <b>mật khẩu MQTT</b>, rồi bấm <b>Gửi cấu hình</b>.</li>
+      <li>Chờ khoảng 15 giây. Nhật ký phải hiện <code>wifi connected</code> và <code>broker1 ... connected</code>. Cấu hình được lưu trong board, lần sau cắm điện là tự nối lại.</li>
+    </ol>
+    <button id="btnConnect">Kết nối board</button>
+    <button id="btnDisconnect" class="secondary" disabled>Ngắt kết nối</button>
+    <span id="connState" class="muted">chưa kết nối</span>
+
+    <div class="row">
+      <div><label>Tên WiFi (2,4 GHz) <small>bắt buộc</small></label><input id="ssid" autocomplete="off"></div>
+      <div><label>Mật khẩu WiFi <small>để trống nếu mạng không có mật khẩu</small></label><input id="wifipass" type="password" autocomplete="new-password"></div>
+      <div><label>Tài khoản MQTT <small>bắt buộc, do người chia sẻ gửi riêng</small></label><input id="user" autocomplete="off"></div>
+      <div><label>Mật khẩu MQTT <small>bắt buộc, do người chia sẻ gửi riêng</small></label><input id="pass" type="password" autocomplete="new-password"></div>
+      <div><label>Mật khẩu quản trị mới <small>nên đặt (mặc định đang là "password")</small></label><input id="adminpass" type="password" autocomplete="new-password"></div>
+    </div>
+    <details>
+      <summary>Máy chủ MQTT (địa chỉ đã có sẵn, chỉ đổi khi bạn có máy chủ riêng)</summary>
+      <div class="row">
+        <div><label>Máy chủ <small>mqtt.host</small></label><input id="host" placeholder="để trống = dùng sẵn có" autocomplete="off"></div>
+        <div><label>Cổng <small>mqtt.port</small></label><input id="port" placeholder="1883" inputmode="numeric"></div>
+        <div><label>Tiền tố chủ đề <small>mqtt.prefix, mọi repeater trong cầu phải giống nhau (mặc định ktm)</small></label><input id="prefix" placeholder="ktm" autocomplete="off"></div>
+      </div>
+      <p class="muted">Chỉ các ô có nhập mới được gửi. Nếu đổi sang máy chủ khác, nhớ nhập đúng tài khoản của máy chủ đó.</p>
+    </details>
+    <button id="btnApply" disabled>Gửi cấu hình</button>
+    <button id="btnStatus" class="secondary" disabled>Xem trạng thái</button>
+    <button id="btnReboot" class="secondary" disabled>Khởi động lại board</button>
+    <pre id="log" aria-live="polite">Nhật ký sẽ hiện ở đây. Mật khẩu được che.</pre>
+  </div>
+
+  <h2 id="kiemtra">3. Kiểm tra</h2>
+  <div class="card">
+    <p>Bấm <b>Xem trạng thái</b>. Kết quả tốt:</p>
+    <pre style="max-height:none">&gt; wifi up (TênWiFi), broker1 ...:1883 up
+&gt; wifi connected, ssid TênWiFi, ip 192.168.x.x, rssi -50 dBm
+&gt; broker1 ...:1883 connected</pre>
+    <p>Khi board đã chạy, bạn cũng có thể gõ các lệnh này (qua Web Serial hoặc app MeshCore khi đăng nhập quản trị):</p>
+    <table>
+      <tr><th>Lệnh</th><th>Cho biết</th></tr>
+      <tr><td><code>get mqtt</code></td><td>Tóm tắt WiFi và máy chủ MQTT, lên hay xuống</td></tr>
+      <tr><td><code>get mqtt.wifi</code></td><td>WiFi nối được chưa, IP, cường độ; nếu chưa, nói lý do</td></tr>
+      <tr><td><code>get mqtt.broker1</code></td><td>Máy chủ MQTT nối được chưa; nếu chưa, nói lý do</td></tr>
+      <tr><td><code>get mqtt.stats</code></td><td>Bộ đếm gói đi qua cầu (pub = đã đẩy lên MQTT, inj = đã phát lại từ MQTT)</td></tr>
+      <tr><td><code>get mqtt.neighbors</code></td><td>Các node đang ở gần mà cầu đang theo dõi</td></tr>
+    </table>
+  </div>
+
+  <h2 id="dung">4. Dùng với app MeshCore</h2>
+  <div class="card">
+    <ol>
+      <li><b>Tần số:</b> trong app, cài tần số, băng thông, SF, CR của repeater cho khớp với mạng của bạn (cùng giá trị với các node gần đó), rồi khởi động lại. Lệnh: <code>set radio &lt;MHz&gt;,&lt;BW&gt;,&lt;SF&gt;,&lt;CR&gt;</code>, ví dụ <code>set radio 920.2501,62.5,8,5</code>, sau đó <code>reboot</code>.</li>
+      <li><b>Thêm contact thủ công:</b> advert <b>không đi qua cầu</b>. Muốn nhắn tin cho người ở bên kia, hai bên phải thêm nhau bằng QR hoặc khoá công khai.</li>
+      <li><b>Cùng tiền tố:</b> hai bên phải dùng cùng tiền tố chủ đề (mặc định <code>ktm</code>) thì mới thấy nhau.</li>
+      <li><b>Quản trị:</b> đăng nhập repeater bằng mật khẩu quản trị. Chưa đổi thì là <code>password</code>.</li>
+    </ol>
+  </div>
+
+  <h2 id="loi">5. Sự cố thường gặp</h2>
+  <div class="card">
+    <table>
+      <tr><th>Triệu chứng</th><th>Nguyên nhân và cách xử lý</th></tr>
+      <tr><td>Không thấy cổng COM</td><td>Cáp chỉ sạc, hoặc chưa cài driver CP210x. Thử cáp khác và cài driver.</td></tr>
+      <tr><td>"Không mở được cổng"</td><td>Có chương trình khác đang dùng cổng (Arduino IDE, PuTTY, tab khác). Đóng chúng.</td></tr>
+      <tr><td><code>wifi network not found</code></td><td>Sai tên WiFi, hoặc mạng 5 GHz. Dùng mạng 2,4 GHz. Phân biệt chữ hoa và thường.</td></tr>
+      <tr><td><code>wifi connect failed (wrong password?)</code></td><td>Sai mật khẩu WiFi. Gửi lại cấu hình.</td></tr>
+      <tr><td><code>broker1 down: bad user or password</code></td><td>Sai tài khoản hoặc mật khẩu MQTT (hoặc tài khoản đã bị thu hồi). Hỏi lại người chia sẻ và nhập lại ở bước 2.</td></tr>
+      <tr><td><code>broker1 down: cannot reach broker</code></td><td>Máy chủ MQTT đang tắt hoặc mạng của bạn chặn cổng 1883. Thử mạng khác (ví dụ phát WiFi từ điện thoại).</td></tr>
+      <tr><td>Nối WiFi và MQTT tốt nhưng không có tin qua cầu</td><td>Kiểm tra tần số khớp, hai bên đã thêm contact của nhau, cùng tiền tố, và <code>get mqtt.neighbors</code> có thấy node ở gần không (node phải phát gói ít nhất mỗi 3 phút).</td></tr>
+      <tr><td>Lỗi lạ sau khi nạp</td><td>Nạp lại và chọn "Erase device".</td></tr>
+    </table>
+  </div>
+
+  <h2 id="nangcao">6. Nâng cao</h2>
+  <div class="card">
+    <p>Mọi cài đặt dùng lệnh <code>set mqtt.&lt;khoá&gt; &lt;giá trị&gt;</code> (giá trị là phần còn lại của dòng, có dấu cách cũng được; để trống để xoá):</p>
+    <table>
+      <tr><th>Khoá</th><th>Ý nghĩa</th></tr>
+      <tr><td><code>ssid</code>, <code>wifipass</code></td><td>Tên và mật khẩu WiFi</td></tr>
+      <tr><td><code>host</code>, <code>port</code>, <code>user</code>, <code>pass</code></td><td>Máy chủ MQTT thứ nhất (host, port, prefix đã đặt sẵn; user và pass bạn nhập)</td></tr>
+      <tr><td><code>host2</code>, <code>port2</code>, <code>user2</code>, <code>pass2</code></td><td>Máy chủ MQTT thứ hai (tuỳ chọn)</td></tr>
+      <tr><td><code>prefix</code></td><td>Tiền tố chủ đề (mặc định <code>ktm</code>)</td></tr>
+      <tr><td><code>group on|off</code></td><td>Có chuyển tin kênh Public qua cầu không (mặc định on, giới hạn 6 tin/phút)</td></tr>
+    </table>
+    <p class="muted">Mật khẩu không bao giờ được hiển thị lại (<code>get</code> chỉ hiện ***). Cài đặt lưu trong flash của board, không mã hoá. Muốn xoá hết: nạp lại firmware và chọn "Erase device".</p>
+  </div>
+
+  <h2>Thông tin bản dựng</h2>
+  <div class="card muted" id="buildinfo">Đang đọc...</div>
+  <p class="muted">Mã nguồn dựa trên <a href="https://github.com/meshcore-dev/MeshCore">MeshCore</a> (giấy phép MIT). Trang và firmware được dựng tự động bằng GitHub Actions từ chính repo này.</p>
+</main>
+
+<script type="module" src="https://cdn.jsdelivr.net/npm/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+<script>
+// ---- build info -------------------------------------------------------------------------------
+fetch('manifest.json', { cache: 'no-store' }).then(r => r.json()).then(m => {
+  document.getElementById('ver').textContent = 'Phiên bản ' + m.version;
+  document.getElementById('buildinfo').textContent =
+    'Phiên bản: ' + m.version + '. Tệp: ' + m.builds[0].parts[0].path + '. Mã SHA256 nằm trong SHA256SUMS.txt cùng thư mục.';
+}).catch(() => { document.getElementById('buildinfo').textContent = 'Không đọc được manifest.json'; });
+
+// ---- Web Serial configuration ---------------------------------------------------------------
+const $ = id => document.getElementById(id);
+const logEl = $('log');
+let port = null, writer = null, reader = null, keepReading = false, rxBuf = '', lastRx = 0;
+
+const SECRET = /(set mqtt\.(wifipass|pass|pass2) |password now: |^password ).*/gim;
+function mask(t) { return t.replace(SECRET, m => m.replace(/(set mqtt\.\w+ |password now: |^password ).*/i, '$1********')); }
+function log(t) { logEl.textContent += mask(t); logEl.scrollTop = logEl.scrollHeight; }
+function setUi(connected) {
+  ['btnApply', 'btnStatus', 'btnReboot', 'btnDisconnect'].forEach(i => $(i).disabled = !connected);
+  $('btnConnect').disabled = connected;
+  $('connState').textContent = connected ? 'đã kết nối' : 'chưa kết nối';
+}
+
+async function readLoop() {
+  const dec = new TextDecoder();
+  while (keepReading && port && port.readable) {
+    reader = port.readable.getReader();
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (value) { const t = dec.decode(value, { stream: true }); rxBuf += t; lastRx = Date.now(); log(t.replace(/\r/g, '')); }
+      }
+    } catch (e) { /* port closed or unplugged */ }
+    finally { reader.releaseLock(); reader = null; }
+  }
+}
+
+async function connect() {
+  if (!('serial' in navigator)) { alert('Cần Chrome hoặc Edge trên máy tính (Web Serial).'); return; }
+  try {
+    port = await navigator.serial.requestPort();
+    await port.open({ baudRate: 115200 });
+  } catch (e) { log('\n[không mở được cổng: ' + e.message + ']\n'); port = null; return; }
+  writer = port.writable.getWriter();
+  keepReading = true; rxBuf = '';
+  readLoop();
+  setUi(true);
+  log('\n[đã kết nối, chờ board sẵn sàng...]\n');
+  await new Promise(r => setTimeout(r, 3500)); // opening the port resets the board
+}
+
+async function disconnect() {
+  keepReading = false;
+  try { if (reader) await reader.cancel(); } catch (e) {}
+  try { if (writer) { writer.releaseLock(); } } catch (e) {}
+  try { if (port) await port.close(); } catch (e) {}
+  port = writer = reader = null;
+  setUi(false);
+  log('\n[đã ngắt kết nối]\n');
+}
+
+// Sends one CLI line and waits until the board has been quiet for 900 ms (or 6 s at most).
+async function send(cmd, shown) {
+  rxBuf = '';
+  log('\n> ' + (shown || cmd) + '\n');
+  await writer.write(new TextEncoder().encode(cmd + '\r'));
+  const t0 = Date.now(); lastRx = Date.now();
+  while (Date.now() - t0 < 6000 && (Date.now() - lastRx < 900 || Date.now() - t0 < 1200)) await new Promise(r => setTimeout(r, 100));
+}
+
+const clean = id => $(id).value.replace(/[\r\n]/g, '');
+
+async function applyConfig() {
+  if (!clean('ssid').trim()) { alert('Hãy nhập tên WiFi.'); return; }
+  if (!clean('user').trim() || clean('pass') === '') { alert('Hãy nhập tài khoản và mật khẩu MQTT (do người chia sẻ gửi riêng).'); return; }
+  ['btnApply', 'btnStatus', 'btnReboot'].forEach(i => $(i).disabled = true);
+  await send('set mqtt.ssid ' + clean('ssid'));
+  await send('set mqtt.wifipass ' + clean('wifipass'));          // empty = open network
+  await send('set mqtt.user ' + clean('user'));
+  await send('set mqtt.pass ' + clean('pass'));
+  for (const key of ['host', 'port', 'prefix']) {  // only what was typed; the defaults are in the firmware
+    if (clean(key).trim() !== '') await send('set mqtt.' + key + ' ' + clean(key));
+  }
+  if (clean('adminpass') !== '') await send('password ' + clean('adminpass'), 'password ********');
+  log('\n[đã gửi xong, chờ board nối WiFi...]\n');
+  await new Promise(r => setTimeout(r, 12000));
+  await status();
+  ['btnApply', 'btnStatus', 'btnReboot'].forEach(i => $(i).disabled = false);
+}
+
+async function status() {
+  for (const c of ['get mqtt', 'get mqtt.wifi', 'get mqtt.broker1']) await send(c);
+}
+
+$('btnConnect').onclick = connect;
+$('btnDisconnect').onclick = disconnect;
+$('btnApply').onclick = () => applyConfig().catch(e => log('\n[lỗi: ' + e.message + ']\n'));
+$('btnStatus').onclick = () => status().catch(e => log('\n[lỗi: ' + e.message + ']\n'));
+$('btnReboot').onclick = () => send('reboot').catch(() => {});
+if (navigator.serial) navigator.serial.addEventListener('disconnect', () => { if (port) disconnect(); });
+setUi(false);
+</script>
+</body>
+</html>

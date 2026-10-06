@@ -1,0 +1,80 @@
+name: MQTT bridge web flasher
+
+# Builds the Heltec V3 MQTT bridge firmware and publishes a web page that flashes it from the browser
+# (ESP Web Tools) to the gh-pages branch. Runs only on the web-flasher branch of a fork, never for pull
+# requests, so it does not interfere with the upstream workflows.
+on:
+  push:
+    branches: [web-flasher]
+  workflow_dispatch:
+
+permissions:
+  contents: write   # needed to push the gh-pages branch with the built-in GITHUB_TOKEN
+
+concurrency:
+  group: mqtt-bridge-flasher
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'variants/heltec_v3/platformio.ini', 'mqtt_public.ini') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Host tests of the bridge logic
+        run: pio test -e native -f test_mqtt_bridge -f test_mqtt_bridge_sim
+
+      - name: Build firmware (Heltec V3, MQTT bridge, default broker from mqtt_public.ini)
+        run: pio run -c mqtt_public.ini -e Heltec_v3_mqtt_public -t mergebin
+
+      - name: Assemble the site
+        run: |
+          set -euo pipefail
+          BIN=.pio/build/Heltec_v3_mqtt_public/firmware-merged.bin
+          test -s "$BIN"
+          mkdir -p site
+          cp web-flasher/index.html site/
+          cp "$BIN" site/heltec_v3_mqtt_bridge.bin
+          VERSION="$(date -u +%Y.%m.%d)-${GITHUB_SHA::7}"
+          sed "s/__VERSION__/${VERSION}/" web-flasher/manifest.json.in > site/manifest.json
+          (cd site && sha256sum heltec_v3_mqtt_bridge.bin > SHA256SUMS.txt)
+          touch site/.nojekyll
+          ls -l site
+          cat site/manifest.json
+
+      - name: Keep the firmware as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: heltec_v3_mqtt_bridge
+          path: site/heltec_v3_mqtt_bridge.bin
+          retention-days: 30
+
+      - name: Publish to gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          cd site
+          git init -q -b gh-pages
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Publish ${GITHUB_SHA::7}"
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" gh-pages
