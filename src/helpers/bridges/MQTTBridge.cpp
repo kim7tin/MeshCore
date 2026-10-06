@@ -4,6 +4,8 @@
 
 #include <esp_system.h>
 
+#include "helpers/bridges/mqtt/MqttStatus.h"
+
 using namespace mqttbridge;
 
 #define MQTT_CONFIG_FILE "/mqtt.cfg"
@@ -133,10 +135,74 @@ bool MQTTBridge::handleSetConfig(const char* config, char* reply) {
   return true;
 }
 
+// Read-only status keys: wifi, broker1, broker2, stats, neighbors. Returns false for other keys.
+bool MQTTBridge::getStatus(const char* key, char* reply) {
+  if (strcmp(key, "wifi") == 0) {
+    if (!_initialized) {
+      strcpy(reply, _cfg.configured() ? "> wifi off (bridge not running)" : "> wifi off (not configured)");
+    } else if (WiFi.status() == WL_CONNECTED) {
+      snprintf(reply, 150, "> wifi connected, ssid %s, ip %s, rssi %d dBm", _cfg.wifi_ssid,
+               WiFi.localIP().toString().c_str(), (int)WiFi.RSSI());
+    } else {
+      snprintf(reply, 150, "> wifi %s, ssid %s", wifiStatusText((int)WiFi.status()), _cfg.wifi_ssid);
+    }
+    return true;
+  }
+  if (strcmp(key, "broker1") == 0 || strcmp(key, "broker2") == 0) {
+    int idx = key[6] - '1';
+    const BrokerConfig& b = _cfg.broker[idx];
+    if (b.host[0] == 0) {
+      snprintf(reply, 150, "> broker%d not set", idx + 1);
+      return true;
+    }
+    int link = -1;  // links are packed: only brokers with a host have one
+    if (_initialized) {
+      link = 0;
+      for (int i = 0; i < idx; i++) {
+        if (_cfg.broker[i].host[0] != 0) link++;
+      }
+    }
+    if (link < 0 || link >= _link_count) {
+      snprintf(reply, 150, "> broker%d %s:%u off (bridge not running)", idx + 1, b.host, (unsigned)b.port);
+    } else if (_links[link].mqtt.connected()) {
+      snprintf(reply, 150, "> broker%d %s:%u connected", idx + 1, b.host, (unsigned)b.port);
+    } else if (WiFi.status() != WL_CONNECTED) {
+      snprintf(reply, 150, "> broker%d %s:%u down: no wifi", idx + 1, b.host, (unsigned)b.port);
+    } else {
+      snprintf(reply, 150, "> broker%d %s:%u down: %s", idx + 1, b.host, (unsigned)b.port,
+               mqttStateText(_links[link].mqtt.state()));
+    }
+    return true;
+  }
+  if (strcmp(key, "stats") == 0) {
+    if (!_initialized || !_core) {
+      strcpy(reply, "> bridge off");
+    } else if (formatStats(_core->stats(), reply, 150) == 0) {
+      strcpy(reply, "> stats unavailable");
+    }
+    return true;
+  }
+  if (strcmp(key, "neighbors") == 0) {
+    if (!_initialized || !_core) {
+      strcpy(reply, "> bridge off");
+      return true;
+    }
+    uint8_t hashes[256];
+    int n = _core->activeNeighbors(hashes, sizeof(hashes));
+    int len = snprintf(reply, 150, "> %d neighbors:", n);
+    int shown = 0;
+    for (; shown < n && len < 140; shown++) len += snprintf(reply + len, 150 - len, " %02x", hashes[shown]);
+    if (shown < n) snprintf(reply + len, 150 - len, " ...");
+    return true;
+  }
+  return false;
+}
+
 bool MQTTBridge::handleGetConfig(const char* config, char* reply) {
   if (strncmp(config, "mqtt", 4) != 0) return false;
   if (!_initialized) loadConfig();  // while running _cfg is already current
   if (config[4] == '.') {
+    if (getStatus(config + 5, reply)) return true;
     char val[96];
     if (!_cfg.get(config + 5, val, sizeof(val))) {
       strcpy(reply, "Error: unknown mqtt setting");

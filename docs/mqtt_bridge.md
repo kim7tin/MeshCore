@@ -47,6 +47,18 @@ set mqtt.group on|off                bridge the Public channel (default on)
 get mqtt                             one-line status: WiFi and every broker up/down
 ```
 
+Status commands (read only):
+
+```
+get mqtt.wifi        connected / why not (network not found, connect failed ...), ssid, ip, rssi
+get mqtt.broker1     connected, or down with the reason (cannot reach broker, bad user or password ...)
+get mqtt.broker2
+get mqtt.stats       counters: pub published, inj injected flood/direct, rate dropped by the rate limit,
+                     q dropped (queue full), dup duplicates, sup publishes suppressed, own own messages
+                     seen again, bad malformed, rej rejected by the safety checks
+get mqtt.neighbors   hashes of the nodes the bridge currently subscribes to
+```
+
 - The value is the rest of the line, so names with spaces work (`set mqtt.ssid My Home WiFi`).
   An empty value clears a setting (`set mqtt.pass`).
 - Every change restarts the bridge (if `bridge.enabled` is on) with the new settings.

@@ -73,6 +73,7 @@ private:
   void applyBuildDefaults();
   void loadConfig();
   bool saveConfig();
+  bool getStatus(const char* key, char* reply);
 
   // BridgeSink
   void subscribe(mqttbridge::TopicKind kind, uint8_t hash) override;
